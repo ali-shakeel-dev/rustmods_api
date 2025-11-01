@@ -1,9 +1,10 @@
 <?php
 /**
  * Plugin Name: RUSTModsAPI
- * Description: Exposes a public JSON API endpoint that lists all WooCommerce products (mods/plugins) with specific fields for use by the RUST Admin tool.
+ * Description: Exposes a public JSON API endpoint that lists all WooCommerce products (mods/plugins) with specific fields.
  * Version: 1.0.0
  * Author: RUSTMods
+ * Author URI: https://rustmods.com/
  * License: GPL-2.0-or-later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
  */
@@ -35,7 +36,6 @@ add_action('rest_api_init', function () {
  */
 function rustmodsapi_get_mods($request)
 {
-	// Serve from transient cache if available
 	$cache_key = 'rustmodsapi_mods_cache';
 	$cached    = get_transient($cache_key);
 	if (is_array($cached)) {
@@ -43,7 +43,6 @@ function rustmodsapi_get_mods($request)
 	}
 
 	$mods = rustmodsapi_generate_mods_data();
-	// Cache for a short period; always invalidated on product save
 	set_transient($cache_key, $mods, 5 * MINUTE_IN_SECONDS);
 
 	return rest_ensure_response($mods);
@@ -72,20 +71,16 @@ function rustmodsapi_generate_mods_data()
 		$title     = function_exists('wc_get_product') ? (wc_get_product($product_id) ? wc_get_product($product_id)->get_name() : get_the_title($product_id)) : get_the_title($product_id);
 		$permalink = get_permalink($product_id);
 
-		// Custom meta (keep filename/author editable)
 		$mod_filename = get_post_meta($product_id, 'mod_filename', true);
 		$mod_author   = get_post_meta($product_id, 'mod_author', true);
 		$mod_version  = get_post_meta($product_id, 'mod_version', true);
 
-		// Auto-detect version from product title; prefer stored meta if present
 		$detected_version = rustmodsapi_detect_version_from_title($title);
 		$final_version    = $mod_version ? $mod_version : $detected_version;
 
 		// Fallbacks
 		if (!$mod_filename) {
-			// Generate filename with version: "ProductName-version.zip" (preserve case)
 			$base_name = rustmodsapi_get_base_name_from_title($title, $final_version);
-			// Include version in filename if a version was detected or explicitly set (not default 1.0.0)
 			if ($detected_version !== '1.0.0' || ($mod_version && $mod_version !== '1.0.0')) {
 				$mod_filename = $base_name . '-' . $final_version . '.zip';
 			} else {
@@ -139,18 +134,16 @@ function rustmodsapi_get_base_name_from_title($title, $version)
 		return 'product';
 	}
 
-	// Remove version from title if present
 	$base = $title;
 	if ($version !== '1.0.0') {
 		$base = preg_replace('/\s*\b' . preg_quote($version, '/') . '\b\s*/', '', $base);
 	}
 
-	// Clean for filename: replace spaces with dashes, remove special chars, preserve case
 	$base = trim($base);
-	$base = preg_replace('/[^a-zA-Z0-9\s-]/', '', $base); // Remove special chars except spaces and dashes
-	$base = preg_replace('/\s+/', '-', $base); // Replace spaces with dashes
-	$base = preg_replace('/-+/', '-', $base); // Collapse multiple dashes
-	$base = trim($base, '-'); // Remove leading/trailing dashes
+	$base = preg_replace('/[^a-zA-Z0-9\s-]/', '', $base);
+	$base = preg_replace('/\s+/', '-', $base);
+	$base = preg_replace('/-+/', '-', $base);
+	$base = trim($base, '-');
 
 	return $base ? $base : 'product';
 }
@@ -162,14 +155,12 @@ add_action('woocommerce_product_options_general_product_data', function () {
 	$the_post_id  = get_the_ID();
 	$current_title = $the_post_id ? get_the_title($the_post_id) : '';
 	
-	// Compute placeholder values dynamically
 	$detected_version = rustmodsapi_detect_version_from_title($current_title);
 	$base_name = rustmodsapi_get_base_name_from_title($current_title, $detected_version);
 	$placeholder_filename = ($detected_version !== '1.0.0') ? ($base_name . '-' . $detected_version . '.zip') : ($base_name . '.zip');
 	$placeholder_version = $detected_version !== '1.0.0' ? $detected_version : '1.0.0';
 	$placeholder_author = 'RUSTMods';
 
-	// Mod Version (editable; auto-detected from title if empty)
 	woocommerce_wp_text_input([
 		'id'          => 'mod_version',
 		'label'       => __('Mod Version', 'rustmodsapi'),
@@ -178,7 +169,6 @@ add_action('woocommerce_product_options_general_product_data', function () {
 		'description' => __('Semantic version for this mod. Auto-detected from product title if empty.', 'rustmodsapi'),
 	]);
 
-	// Mod Filename (editable; auto-computed from title/version if empty)
 	woocommerce_wp_text_input([
 		'id'          => 'mod_filename',
 		'label'       => __('Mod Filename', 'rustmodsapi'),
@@ -187,7 +177,6 @@ add_action('woocommerce_product_options_general_product_data', function () {
 		'description' => __('Filename exposed via API. Auto-computed from title/version if empty.', 'rustmodsapi'),
 	]);
 
-	// Mod Author (editable; defaults to RUSTMods in API if empty)
 	woocommerce_wp_text_input([
 		'id'          => 'mod_author',
 		'label'       => __('Mod Author', 'rustmodsapi'),
@@ -196,7 +185,6 @@ add_action('woocommerce_product_options_general_product_data', function () {
 		'description' => __('Displayed author name for this mod. Defaults to RUSTMods in API if empty.', 'rustmodsapi'),
 	]);
 
-	// Divider
 	echo '<div style="margin:12px 0;border-top:1px solid #e2e2e2;"></div>';
 });
 
@@ -207,46 +195,39 @@ add_action('woocommerce_product_options_general_product_data', function () {
  * @param int $post_id
  */
 add_action('woocommerce_process_product_meta', function ($post_id) {
-	// Handle mod_version: only save if admin explicitly entered a value
 	if (isset($_POST['mod_version'])) {
 		$posted_version = trim(wp_unslash($_POST['mod_version']));
 		if ($posted_version !== '') {
 			update_post_meta($post_id, 'mod_version', sanitize_text_field($posted_version));
 		} else {
-			// If field was cleared, delete meta so API uses auto-detection
 			delete_post_meta($post_id, 'mod_version');
 		}
 	}
 
-	// Handle mod_filename: only save if admin explicitly entered a value
 	if (isset($_POST['mod_filename'])) {
 		$posted_filename = trim(wp_unslash($_POST['mod_filename']));
 		if ($posted_filename !== '') {
 			update_post_meta($post_id, 'mod_filename', sanitize_text_field($posted_filename));
 		} else {
-			// If field was cleared, delete meta so API uses auto-computation
 			delete_post_meta($post_id, 'mod_filename');
 		}
 	}
 
-	// Handle mod_author: only save if admin explicitly entered a value
 	if (isset($_POST['mod_author'])) {
 		$posted_author = trim(wp_unslash($_POST['mod_author']));
 		if ($posted_author !== '') {
 			update_post_meta($post_id, 'mod_author', sanitize_text_field($posted_author));
 		} else {
-			// If field was cleared, delete meta so API uses default
 			delete_post_meta($post_id, 'mod_author');
 		}
 	}
-}, 20); // Priority 20 to run after title is saved
+}, 20);
 
 /**
  * Invalidate and regenerate cache whenever a product is saved/updated.
  * Run after meta fields are saved.
  */
 add_action('save_post_product', function ($post_id) {
-	// Skip autosaves and revisions
 	if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) {
 		return;
 	}
@@ -256,7 +237,6 @@ add_action('save_post_product', function ($post_id) {
 
 	$cache_key = 'rustmodsapi_mods_cache';
 	delete_transient($cache_key);
-	// Regenerate immediately so API is hot and up to date
 	$mods = rustmodsapi_generate_mods_data();
 	set_transient($cache_key, $mods, 5 * MINUTE_IN_SECONDS);
-}, 99, 1); // Priority 99 to run after all meta saves
+}, 99, 1);
