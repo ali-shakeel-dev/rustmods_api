@@ -159,11 +159,21 @@ function rustmodsapi_get_base_name_from_title($title, $version)
  * Add custom fields to WooCommerce product admin (General tab).
  */
 add_action('woocommerce_product_options_general_product_data', function () {
+	$the_post_id  = get_the_ID();
+	$current_title = $the_post_id ? get_the_title($the_post_id) : '';
+	
+	// Compute placeholder values dynamically
+	$detected_version = rustmodsapi_detect_version_from_title($current_title);
+	$base_name = rustmodsapi_get_base_name_from_title($current_title, $detected_version);
+	$placeholder_filename = ($detected_version !== '1.0.0') ? ($base_name . '-' . $detected_version . '.zip') : ($base_name . '.zip');
+	$placeholder_version = $detected_version !== '1.0.0' ? $detected_version : '1.0.0';
+	$placeholder_author = 'RUSTMods';
+
 	// Mod Version (editable; auto-detected from title if empty)
 	woocommerce_wp_text_input([
 		'id'          => 'mod_version',
 		'label'       => __('Mod Version', 'rustmodsapi'),
-		'placeholder' => 'e.g. 1.0.0',
+		'placeholder' => $placeholder_version,
 		'desc_tip'    => true,
 		'description' => __('Semantic version for this mod. Auto-detected from product title if empty.', 'rustmodsapi'),
 	]);
@@ -172,7 +182,7 @@ add_action('woocommerce_product_options_general_product_data', function () {
 	woocommerce_wp_text_input([
 		'id'          => 'mod_filename',
 		'label'       => __('Mod Filename', 'rustmodsapi'),
-		'placeholder' => 'e.g. Raid-Protection-2.1.0.zip',
+		'placeholder' => $placeholder_filename,
 		'desc_tip'    => true,
 		'description' => __('Filename exposed via API. Auto-computed from title/version if empty.', 'rustmodsapi'),
 	]);
@@ -181,7 +191,7 @@ add_action('woocommerce_product_options_general_product_data', function () {
 	woocommerce_wp_text_input([
 		'id'          => 'mod_author',
 		'label'       => __('Mod Author', 'rustmodsapi'),
-		'placeholder' => 'e.g. RUSTMods',
+		'placeholder' => $placeholder_author,
 		'desc_tip'    => true,
 		'description' => __('Displayed author name for this mod. Defaults to RUSTMods in API if empty.', 'rustmodsapi'),
 	]);
@@ -192,55 +202,42 @@ add_action('woocommerce_product_options_general_product_data', function () {
 
 /**
  * Save custom fields on product save.
+ * Only save fields that admin explicitly fills in - no auto-updates.
  *
  * @param int $post_id
  */
 add_action('woocommerce_process_product_meta', function ($post_id) {
-	// Get the NEW title (after save, from POST or from database)
-	$new_title = '';
-	if (isset($_POST['post_title'])) {
-		$new_title = sanitize_text_field(wp_unslash($_POST['post_title']));
-	} else {
-		$new_title = get_the_title($post_id);
+	// Handle mod_version: only save if admin explicitly entered a value
+	if (isset($_POST['mod_version'])) {
+		$posted_version = trim(wp_unslash($_POST['mod_version']));
+		if ($posted_version !== '') {
+			update_post_meta($post_id, 'mod_version', sanitize_text_field($posted_version));
+		} else {
+			// If field was cleared, delete meta so API uses auto-detection
+			delete_post_meta($post_id, 'mod_version');
+		}
 	}
 
-	// Auto-detect version from new title
-	$detected_version = rustmodsapi_detect_version_from_title($new_title);
-	$existing_version = get_post_meta($post_id, 'mod_version', true);
-
-	// Handle mod_version: auto-update if title changed and version was detected (unless manually edited)
-	$posted_version = isset($_POST['mod_version']) ? trim(wp_unslash($_POST['mod_version'])) : '';
-	if ($posted_version !== '') {
-		// User manually set version - save it
-		update_post_meta($post_id, 'mod_version', sanitize_text_field($posted_version));
-		$final_version = sanitize_text_field($posted_version);
-	} elseif ($detected_version !== '1.0.0' && $detected_version !== $existing_version) {
-		// Auto-update version from title if detected and differs from existing
-		update_post_meta($post_id, 'mod_version', $detected_version);
-		$final_version = $detected_version;
-	} elseif ($existing_version) {
-		$final_version = $existing_version;
-	} else {
-		$final_version = $detected_version;
-		update_post_meta($post_id, 'mod_version', $detected_version);
+	// Handle mod_filename: only save if admin explicitly entered a value
+	if (isset($_POST['mod_filename'])) {
+		$posted_filename = trim(wp_unslash($_POST['mod_filename']));
+		if ($posted_filename !== '') {
+			update_post_meta($post_id, 'mod_filename', sanitize_text_field($posted_filename));
+		} else {
+			// If field was cleared, delete meta so API uses auto-computation
+			delete_post_meta($post_id, 'mod_filename');
+		}
 	}
 
-	// Handle mod_filename: auto-update if version changed (unless manually edited)
-	$posted_filename = isset($_POST['mod_filename']) ? trim(wp_unslash($_POST['mod_filename'])) : '';
-	if ($posted_filename !== '') {
-		// User manually set filename - save it
-		update_post_meta($post_id, 'mod_filename', sanitize_text_field($posted_filename));
-	} else {
-		// Auto-compute filename from new title + version
-		$base_name = rustmodsapi_get_base_name_from_title($new_title, $final_version);
-		$computed_filename = ($final_version !== '1.0.0') ? ($base_name . '-' . $final_version . '.zip') : ($base_name . '.zip');
-		update_post_meta($post_id, 'mod_filename', $computed_filename);
-	}
-
-	// Handle mod_author: save if posted
+	// Handle mod_author: only save if admin explicitly entered a value
 	if (isset($_POST['mod_author'])) {
-		$value = wp_unslash($_POST['mod_author']);
-		update_post_meta($post_id, 'mod_author', sanitize_text_field($value));
+		$posted_author = trim(wp_unslash($_POST['mod_author']));
+		if ($posted_author !== '') {
+			update_post_meta($post_id, 'mod_author', sanitize_text_field($posted_author));
+		} else {
+			// If field was cleared, delete meta so API uses default
+			delete_post_meta($post_id, 'mod_author');
+		}
 	}
 }, 20); // Priority 20 to run after title is saved
 
