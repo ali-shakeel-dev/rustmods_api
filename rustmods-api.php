@@ -80,20 +80,22 @@ function rustmodsapi_generate_mods_data()
 
 		// Fallbacks
 		if (!$mod_filename) {
-			$base_name = rustmodsapi_get_base_name_from_title($title, $final_version);
-			if ($detected_version !== '1.0.0' || ($mod_version && $mod_version !== '1.0.0')) {
-				$mod_filename = $base_name . '-' . $final_version . '.zip';
-			} else {
-				$mod_filename = $base_name . '.zip';
-			}
+			$mod_filename = rustmodsapi_generate_cs_filename($title, $final_version);
 		}
 		if (!$mod_author) {
 			$mod_author = 'RUSTMods';
 		}
 
+		// Remove version from name for display (keep version in 'last' field)
+		$clean_name = $title;
+		if ($final_version !== '1.0.0') {
+			$clean_name = preg_replace('/\s*\b' . preg_quote($final_version, '/') . '\b\s*/', '', $clean_name);
+		}
+		$clean_name = trim($clean_name);
+
 		$mods[] = [
 			'filename' => (string) wp_strip_all_tags($mod_filename),
-			'name'     => (string) wp_strip_all_tags($title),
+			'name'     => (string) wp_strip_all_tags($clean_name),
 			'last'     => (string) wp_strip_all_tags($final_version),
 			'author'   => (string) wp_strip_all_tags($mod_author),
 			'url'      => (string) esc_url_raw($permalink),
@@ -122,7 +124,43 @@ function rustmodsapi_detect_version_from_title($title)
 }
 
 /**
- * Get base name from product title, removing version and cleaning for filename (preserves case).
+ * @param string $title
+ * @param string $version
+ * @return string
+ */
+function rustmodsapi_generate_cs_filename($title, $version)
+{
+	if (!is_string($title) || $title === '') {
+		return 'Product.cs';
+	}
+
+	$base = $title;
+	if ($version !== '1.0.0') {
+		$base = preg_replace('/\s*\b' . preg_quote($version, '/') . '\b\s*/', '', $base);
+	}
+
+	$base = preg_replace('/[^a-zA-Z0-9\s]/', '', $base);
+	
+	$base = trim($base);
+	$base = preg_replace('/\s+/', ' ', $base);
+	
+	$words = explode(' ', $base);
+	$pascalCase = '';
+	foreach ($words as $word) {
+		if (!empty($word)) {
+			$pascalCase .= ucfirst(strtolower($word));
+		}
+	}
+
+	if (empty($pascalCase)) {
+		$pascalCase = 'Product';
+	}
+
+	return $pascalCase . '.cs';
+}
+
+/**
+ * @deprecated
  *
  * @param string $title
  * @param string $version
@@ -156,8 +194,7 @@ add_action('woocommerce_product_options_general_product_data', function () {
 	$current_title = $the_post_id ? get_the_title($the_post_id) : '';
 	
 	$detected_version = rustmodsapi_detect_version_from_title($current_title);
-	$base_name = rustmodsapi_get_base_name_from_title($current_title, $detected_version);
-	$placeholder_filename = ($detected_version !== '1.0.0') ? ($base_name . '-' . $detected_version . '.zip') : ($base_name . '.zip');
+	$placeholder_filename = rustmodsapi_generate_cs_filename($current_title, $detected_version);
 	$placeholder_version = $detected_version !== '1.0.0' ? $detected_version : '1.0.0';
 	$placeholder_author = 'RUSTMods';
 
@@ -174,7 +211,7 @@ add_action('woocommerce_product_options_general_product_data', function () {
 		'label'       => __('Mod Filename', 'rustmodsapi'),
 		'placeholder' => $placeholder_filename,
 		'desc_tip'    => true,
-		'description' => __('Filename exposed via API. Auto-computed from title/version if empty.', 'rustmodsapi'),
+		'description' => __('C# filename exposed via API (PascalCase, .cs extension). Auto-computed from title if empty.', 'rustmodsapi'),
 	]);
 
 	woocommerce_wp_text_input([
