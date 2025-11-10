@@ -98,12 +98,13 @@ function rustmodsapi_generate_mods_data()
 			} else {
 				$mod_filename = rustmodsapi_generate_cs_filename($title, $final_version);
 			}
+		} else {
+			$mod_filename = rustmodsapi_clean_cs_filename($mod_filename);
 		}
 		if (!$mod_author) {
 			$mod_author = 'RUSTMods';
 		}
 
-		// Remove version from name for display (keep version in 'last' field)
 		$clean_name = $title;
 		if ($final_version !== '1.0.0') {
 			$clean_name = preg_replace('/\s*\b' . preg_quote($final_version, '/') . '\b\s*/', '', $clean_name);
@@ -228,7 +229,51 @@ function rustmodsapi_extract_cs_filename_from_zip($product_id)
 		@unlink($file_path);
 	}
 
+	if ($cs_filename) {
+		$cs_filename = rustmodsapi_clean_cs_filename($cs_filename);
+	}
+
 	return $cs_filename;
+}
+
+/**
+ *
+ * @param string $filename
+ * @return string
+ */
+function rustmodsapi_clean_cs_filename($filename)
+{
+	if (!is_string($filename) || empty($filename)) {
+		return $filename;
+	}
+
+	if (strpos($filename, '-') === false && strpos($filename, '_') === false) {
+		return $filename;
+	}
+
+	$has_extension = preg_match('/\.cs$/i', $filename);
+	$base_name = preg_replace('/\.cs$/i', '', $filename);
+
+	$base_name = str_replace(['-', '_'], ' ', $base_name);
+
+	$base_name = preg_replace('/[^a-zA-Z0-9\s]/', '', $base_name);
+
+	$base_name = trim($base_name);
+	$base_name = preg_replace('/\s+/', ' ', $base_name);
+
+	$words = explode(' ', $base_name);
+	$pascalCase = '';
+	foreach ($words as $word) {
+		if (!empty($word)) {
+			$pascalCase .= ucfirst(strtolower($word));
+		}
+	}
+
+	if (empty($pascalCase)) {
+		$pascalCase = 'Product';
+	}
+
+	return $pascalCase . ($has_extension ? '.cs' : '');
 }
 
 /**
